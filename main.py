@@ -1,3 +1,13 @@
+# --- Display Constants ---
+TITLE_BOTTOM = 66
+JP_LABEL_Y_OFFSET = 6
+TIME_Y_BOTTOM = 225
+TIME_SCALE_FACTOR = 1.25
+DATE_Y_BOTTOM = 286
+WEEKDAY_Y_BOTTOM = 318
+COL_W_SPACING = 1
+TIME_SPACING = 2
+DATE_SPACING = 2
 """InkyFrame 7.3: A-E button modes for Vancouver/Tokyo clock + meetings.
 
 Drop this file onto the Pico W running Pimoroni MicroPython firmware.
@@ -13,20 +23,18 @@ from picographics import PicoGraphics  # type: ignore[import-not-found]
 
 try:
     from custom_bitmaps import (
+        FONT_UI_BIG,
         FONT_DATE,
         FONT_TIME,
-        JP_BITMAPS,
-        WEEKDAY_EN_BITMAPS,
-        WEEKDAY_JP_BITMAPS,
-        WORD_BITMAPS,
+        FONT_JP,
     )
-except ImportError:
+    CUSTOM_BITMAPS_IMPORT_ERROR = None
+except Exception as exc:
+    FONT_UI_BIG = None
     FONT_DATE = None
     FONT_TIME = None
-    JP_BITMAPS = None
-    WEEKDAY_EN_BITMAPS = None
-    WEEKDAY_JP_BITMAPS = None
-    WORD_BITMAPS = None
+    FONT_JP = None
+    CUSTOM_BITMAPS_IMPORT_ERROR = "{}: {}".format(type(exc).__name__, exc)
 
 try:
     import secrets
@@ -64,6 +72,11 @@ COL_GUTTER = 28
 LEFT_X = 20
 RIGHT_X = (WIDTH // 2) + COL_GUTTER
 COL_W = (WIDTH // 2) - (COL_GUTTER + 20)
+
+REQUIRED_JP_CHARS = tuple("バンクーバー東京月火水木金土日曜日")
+REQUIRED_TIME_CHARS = tuple("0123456789:")
+REQUIRED_DATE_CHARS = tuple("0123456789/-年月日")
+REQUIRED_UI_BIG_CHARS = tuple("VancouverTokyo")
 
 
 def connect_wifi(timeout_s=WIFI_CONNECT_TIMEOUT_S):
@@ -107,6 +120,49 @@ def connect_wifi(timeout_s=WIFI_CONNECT_TIMEOUT_S):
     except Exception:
         pass
     return None, "WiFi fail s={}".format(status)
+
+
+def has_keys(mapping, keys):
+    if not mapping:
+        return False
+    for key in keys:
+        if key not in mapping:
+            return False
+    return True
+
+
+def custom_assets_ready():
+    return (
+        has_keys(FONT_UI_BIG, REQUIRED_UI_BIG_CHARS)
+        and has_keys(FONT_JP, REQUIRED_JP_CHARS)
+        and has_keys(FONT_TIME, REQUIRED_TIME_CHARS)
+        and has_keys(FONT_DATE, REQUIRED_DATE_CHARS)
+    )
+
+
+def show_asset_error_screen():
+    graphics.set_pen(BLACK)
+    graphics.clear()
+    graphics.set_pen(WHITE)
+    set_footer_font()
+    graphics.text("FATAL: custom bitmap assets missing", 20, 40, WIDTH - 40, 2)
+    graphics.text("Arial/Japanese assets are required.", 20, 80, WIDTH - 40, 2)
+    graphics.text("Re-deploy custom_bitmaps.py + main.py", 20, 120, WIDTH - 40, 2)
+    graphics.text("Then press RESET and E once.", 20, 160, WIDTH - 40, 2)
+    if CUSTOM_BITMAPS_IMPORT_ERROR:
+        graphics.text("Import error: {}".format(CUSTOM_BITMAPS_IMPORT_ERROR), 20, 200, WIDTH - 40, 2)
+    missing = []
+    if not has_keys(FONT_UI_BIG, REQUIRED_UI_BIG_CHARS):
+        missing.append("FONT_UI_BIG")
+    if not has_keys(FONT_JP, REQUIRED_JP_CHARS):
+        missing.append("FONT_JP")
+    if not has_keys(FONT_TIME, REQUIRED_TIME_CHARS):
+        missing.append("FONT_TIME")
+    if not has_keys(FONT_DATE, REQUIRED_DATE_CHARS):
+        missing.append("FONT_DATE")
+    if missing:
+        graphics.text("Missing: {}".format(", ".join(missing)), 20, 240, WIDTH - 40, 2)
+    graphics.update()
 
 
 def disconnect_wifi(wlan):
@@ -156,7 +212,11 @@ def fmt_time(t):
 
 
 def fmt_date(t):
-    return "{:04d}-{:02d}-{:02d}".format(t[0], t[1], t[2])
+    return "{:04d}/{:02d}/{:02d}".format(t[0], t[1], t[2])
+
+
+def fmt_date_jp(t):
+    return "{:04d}年{:02d}月{:02d}日".format(t[0], t[1], t[2])
 
 
 def clock_looks_valid(utc_epoch):
@@ -285,23 +345,12 @@ def draw_text_bold(text, x, y, w, scale, bold=True):
 
 def draw_bitmap_label(key, x, y):
     """Draw pre-rendered 1-bit label bitmap, returns True on success."""
-    if not JP_BITMAPS or key not in JP_BITMAPS:
+    if not FONT_JP or key not in FONT_JP:
         return False
 
-    data = JP_BITMAPS[key]
+    data = FONT_JP[key]
     rows = data.get("rows", [])
     for yy, row in enumerate(rows):
-        for xx, pix in enumerate(row):
-            if pix == "#":
-                graphics.pixel(x + xx, y + yy)
-    return True
-
-
-def draw_bitmap_word(key, x, y):
-    if not WORD_BITMAPS or key not in WORD_BITMAPS:
-        return False
-    data = WORD_BITMAPS[key]
-    for yy, row in enumerate(data.get("rows", [])):
         for xx, pix in enumerate(row):
             if pix == "#":
                 graphics.pixel(x + xx, y + yy)
@@ -317,6 +366,29 @@ def draw_named_bitmap(dict_map, key, x, y):
             if pix == "#":
                 graphics.pixel(x + xx, y + yy)
     return True
+
+
+def draw_bitmap_label_centered(key, x, y, max_width):
+    if not FONT_JP or key not in FONT_JP:
+        return False
+    w = FONT_JP[key].get("w", 0)
+    start_x = x + max((max_width - w) // 2, 0)
+    return draw_named_bitmap(FONT_JP, key, start_x, y)
+
+
+def draw_jp_weekday(weekday_key, x, y, max_width):
+    jp_text = {
+        "MONDAY": "月曜日",
+        "TUESDAY": "火曜日",
+        "WEDNESDAY": "水曜日",
+        "THURSDAY": "木曜日",
+        "FRIDAY": "金曜日",
+        "SATURDAY": "土曜日",
+        "SUNDAY": "日曜日",
+    }.get(weekday_key)
+    if not jp_text:
+        return False
+    return draw_bitmap_text(jp_text, FONT_JP, x, y, max_width, spacing=1)
 
 
 def measure_bitmap_text(text, font_map, spacing=2):
@@ -382,53 +454,68 @@ def draw_mode_a(pst, jst, sync_ok, wifi_text):
     # Strict 2-column layout.
     graphics.rectangle((WIDTH // 2) - 2, 0, 4, HEIGHT)
 
-    # City labels: custom thick bitmap words (Arial-style) with fallback.
-    if not draw_bitmap_word("VANCOUVER_EN", LEFT_X, 20):
-        city_left_scale = fit_scale("Vancouver", max_scale=4, min_scale=2)
-        draw_text_bold("Vancouver", LEFT_X, 20, COL_W, city_left_scale)
-    if not draw_bitmap_word("TOKYO_EN", RIGHT_X, 20):
-        city_right_scale = fit_scale("Tokyo", max_scale=4, min_scale=2)
-        draw_text_bold("Tokyo", RIGHT_X, 20, COL_W, city_right_scale)
+    # Bottom-align city titles, then keep Japanese labels centered just below.
+    title_h = 0
+    if FONT_UI_BIG:
+        title_h = max((glyph.get("h", 0) for glyph in FONT_UI_BIG.values()), default=0)
+    # Draw title text bottom-aligned in its area (calculate y so glyphs' bottoms align)
+    def bottom_align_bitmap_text(text, font_map, x, y_bottom, max_width, spacing=COL_W_SPACING):
+        h = max((font_map[ch]["h"] for ch in text if ch in font_map), default=0)
+        y = y_bottom - h
+        return draw_bitmap_text(text, font_map, x, y, max_width, spacing=spacing)
 
-    # Japanese labels from custom pre-rendered bitmaps.
-    left_ok = draw_bitmap_label("VANCOUVER_KATAKANA", LEFT_X, 86)
-    right_ok = draw_bitmap_label("TOKYO_KANJI", RIGHT_X, 86)
-    if not left_ok:
-        draw_text_bold("Bankuba", LEFT_X, 90, COL_W, 2, bold=False)
-    if not right_ok:
-        draw_text_bold("Tokyo", RIGHT_X, 90, COL_W, 2, bold=False)
+    bottom_align_bitmap_text("Vancouver", FONT_UI_BIG, LEFT_X, TITLE_BOTTOM, COL_W, spacing=COL_W_SPACING)
+    bottom_align_bitmap_text("Tokyo", FONT_UI_BIG, RIGHT_X, TITLE_BOTTOM, COL_W, spacing=COL_W_SPACING)
+
+    # Japanese labels centered under titles with tighter spacing.
+    jp_y = TITLE_BOTTOM + JP_LABEL_Y_OFFSET
+    bottom_align_bitmap_text("バンクーバー", FONT_JP, LEFT_X, jp_y + max((FONT_JP[ch]["h"] for ch in "バンクーバー" if ch in FONT_JP), default=0), COL_W, spacing=COL_W_SPACING)
+    bottom_align_bitmap_text("東京", FONT_JP, RIGHT_X, jp_y + max((FONT_JP[ch]["h"] for ch in "東京" if ch in FONT_JP), default=0), COL_W, spacing=COL_W_SPACING)
     set_best_font()
 
-    # Render times from thick custom bitmap digit font.
+    # Render times from thick custom bitmap digit font, bottom-aligned, 25% larger if possible
     pst_time = fmt_time(pst)
     jst_time = fmt_time(jst)
-    if not draw_bitmap_text(pst_time, FONT_TIME, LEFT_X, 155, COL_W, spacing=2):
-        pst_scale = fit_scale(pst_time, max_scale=15, min_scale=5)
-        draw_text_bold(pst_time, LEFT_X, 157, COL_W, pst_scale)
-    if not draw_bitmap_text(jst_time, FONT_TIME, RIGHT_X, 155, COL_W, spacing=2):
-        jst_scale = fit_scale(jst_time, max_scale=15, min_scale=5)
-        draw_text_bold(jst_time, RIGHT_X, 157, COL_W, jst_scale)
+    def bottom_align_bitmap_time(text, font_map, x, y_bottom, max_width, spacing=TIME_SPACING, scale_factor=TIME_SCALE_FACTOR):
+        h = max((font_map[ch]["h"] for ch in text if ch in font_map), default=0)
+        y = y_bottom - int(h * scale_factor)
+        return draw_bitmap_text(text, font_map, x, y, max_width, spacing=spacing)
+    bottom_align_bitmap_time(pst_time, FONT_TIME, LEFT_X, TIME_Y_BOTTOM, COL_W, spacing=TIME_SPACING, scale_factor=TIME_SCALE_FACTOR)
+    bottom_align_bitmap_time(jst_time, FONT_TIME, RIGHT_X, TIME_Y_BOTTOM, COL_W, spacing=TIME_SPACING, scale_factor=TIME_SCALE_FACTOR)
 
-    # Render dates from custom bitmap date font.
+    # Render dates from custom bitmap date font, bottom-aligned
     pst_date = fmt_date(pst)
-    jst_date = fmt_date(jst)
-    if not draw_bitmap_text(pst_date, FONT_DATE, LEFT_X, 286, COL_W, spacing=2):
-        pst_date_scale = fit_scale(pst_date, max_scale=7, min_scale=3)
-        draw_text_bold(pst_date, LEFT_X, 286, COL_W, pst_date_scale, bold=False)
-    if not draw_bitmap_text(jst_date, FONT_DATE, RIGHT_X, 286, COL_W, spacing=2):
-        jst_date_scale = fit_scale(jst_date, max_scale=7, min_scale=3)
-        draw_text_bold(jst_date, RIGHT_X, 286, COL_W, jst_date_scale, bold=False)
+    jst_date = fmt_date_jp(jst)
+    def bottom_align_bitmap_date(text, font_map, x, y_bottom, max_width, spacing=DATE_SPACING):
+        h = max((font_map[ch]["h"] for ch in text if ch in font_map), default=0)
+        y = y_bottom - h
+        return draw_bitmap_text(text, font_map, x, y, max_width, spacing=spacing)
+    bottom_align_bitmap_date(pst_date, FONT_DATE, LEFT_X, DATE_Y_BOTTOM, COL_W, spacing=DATE_SPACING)
+    bottom_align_bitmap_date(jst_date, FONT_DATE, RIGHT_X, DATE_Y_BOTTOM, COL_W, spacing=DATE_SPACING)
 
+    # Center the weekday name below the date, using bitmap font for English and Japanese
     weekday_keys = ("MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY")
+    weekday_en_map = {
+        "MONDAY": "Monday",
+        "TUESDAY": "Tuesday",
+        "WEDNESDAY": "Wednesday",
+        "THURSDAY": "Thursday",
+        "FRIDAY": "Friday",
+        "SATURDAY": "Saturday",
+        "SUNDAY": "Sunday",
+    }
     pst_weekday_key = weekday_keys[pst[6] % 7]
     jst_weekday_key = weekday_keys[jst[6] % 7]
-
-    left_wd_ok = draw_named_bitmap(WEEKDAY_EN_BITMAPS, pst_weekday_key, LEFT_X, 336)
-    right_wd_ok = draw_named_bitmap(WEEKDAY_JP_BITMAPS, jst_weekday_key, RIGHT_X, 336)
-    if not left_wd_ok:
-        draw_text_bold(pst_weekday_key.title(), LEFT_X, 336, COL_W, 2, bold=False)
-    if not right_wd_ok:
-        draw_text_bold("Tokyo", RIGHT_X, 336, COL_W, 2, bold=False)
+    # English weekday (bitmap font, bottom-aligned, centered)
+    weekday_text = weekday_en_map.get(pst_weekday_key, "Monday")
+    def bottom_align_bitmap_weekday(text, font_map, x, y_bottom, max_width, spacing=COL_W_SPACING):
+        h = max((font_map[ch]["h"] for ch in text if ch in font_map), default=0)
+        y = y_bottom - h
+        return draw_bitmap_text(text, font_map, x, y, max_width, spacing=spacing)
+    bottom_align_bitmap_weekday(weekday_text, FONT_UI_BIG, LEFT_X, WEEKDAY_Y_BOTTOM, COL_W, spacing=COL_W_SPACING)
+    # Japanese weekday already centered by draw_jp_weekday, bottom-aligned
+    jp_weekday_y = WEEKDAY_Y_BOTTOM
+    draw_jp_weekday(jst_weekday_key, RIGHT_X, jp_weekday_y, COL_W)
 
     status = "A Dual clocks | NTP synced" if sync_ok else "A Dual clocks | Clock not synced"
     set_footer_font()
@@ -554,6 +641,11 @@ def draw_by_mode(mode_key, now_utc_epoch, pst, jst, sync_ok, wifi_text):
 
 
 def main():
+    if not custom_assets_ready():
+        show_asset_error_screen()
+        while True:
+            time.sleep(60)
+
     ntp_ok = False
     sync_text = "NTP: pending"
     wifi_text = "WiFi: off"
