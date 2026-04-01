@@ -3,7 +3,7 @@
 A MicroPython world clock and meeting board for Pimoroni InkyFrame (RP2040/Pico W). Shows dual time zones (Vancouver & Tokyo), local/JP dates, and meetings with custom bitmap fonts (including kanji). Features WiFi NTP sync, button modes, and a memory-safe, customizable e-paper display.
 
 This MVP replaces the screen content with two fixed-offset clocks:
-- Vancouver (PST, UTC-8, fixed year-round)
+- Vancouver (Pacific Time, UTC offset set in code; does not auto-adjust for DST)
 - Japan (JST, UTC+9)
 
 ## 1) Device prerequisites
@@ -50,7 +50,7 @@ This will reboot the Pico W and run `main.py`, updating the display.
 
 The e-ink screen should show:
 - Title: "InkyFrame 7.3 - Time MVP"
-- Vancouver (PST)
+- Vancouver (Pacific Time)
 - Japan (JST)
 
 ## Notes
